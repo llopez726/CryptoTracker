@@ -1,8 +1,13 @@
 import time
-import requests
+from datetime import datetime
+from api_bitso import obtener_precio
+from gestor_datos import inicializar_csv, guardar_registros, verificar_alerta
 
-def consultar_bitso_en_dolares():
+def ejecutar_monitor():
     pares = [
+        {"nombre": "Bitcoin (BTC)", "book": "btc_usd"},
+        {"nombre": "Ethereum (ETH)", "book": "eth_usd"},
+        {"nombre": "Litecoin (LTC)", "book": "ltc_usd"},
         {"nombre": "Cosmos (ATOM)", "book": "atom_usd"},
         {"nombre": "Dogecoin (DOGE)", "book": "doge_usd"},
         {"nombre": "Ripple (XRP)", "book": "xrp_usd"},
@@ -10,32 +15,52 @@ def consultar_bitso_en_dolares():
         {"nombre": "TRON (TRX)", "book": "trx_usd"}
     ]
     
-    print("Iniciando monitor de criptomonedas (Presiona Ctrl + C para salir)...\n")
+    precios_anteriores = {}
+    inicializar_csv()
     
-    # Un ciclo infinito para que se repita constantemente
+    print("Iniciando CryptoTracker con Alertas Inteligentes. Presiona Ctrl + C para salir...\n")
+    
     while True:
-        print("--------------------------------------------------")
-        print("Actualizando precios...")
+        tiempo_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"================ [{tiempo_actual}] ================")
+        
+        datos_para_guardar = []
         
         for cripto in pares:
-            url = f"https://api.bitso.com/v3/ticker/?book={cripto['book']}"
+            precio_actual = obtener_precio(cripto["book"])
             
-            try:
-                respuesta = requests.get(url, timeout=5)
+            if precio_actual is not None:
+                cambio_str = ""
+                porcentaje = 0.0
                 
-                if respuesta.status_code == 200:
-                    datos = respuesta.json()
-                    precio = datos["payload"]["last"]
-                    print(f"-> {cripto['nombre']}: ${float(precio):,.4f} USD")
-                else:
-                    print(f"-> No se encontró el par para {cripto['nombre']}.")
+                if cripto["book"] in precios_anteriores:
+                    precio_anterior = precios_anteriores[cripto["book"]]
+                    diferencia = precio_actual - precio_anterior
                     
-            except Exception as e:
-                print(f"Error de red con {cripto['nombre']}: {e}")
-        
+                    if precio_anterior > 0:
+                        porcentaje = (diferencia / precio_anterior) * 100
+                        if porcentaje > 0:
+                            cambio_str = f" (▲ +{porcentaje:.2f}%)"
+                        elif porcentaje < 0:
+                            cambio_str = f" (▼ {porcentaje:.2f}%)"
+                        else:
+                            cambio_str = " (— 0.00%)"
+                        
+                        # Evaluamos si el movimiento supera el umbral para lanzar alerta
+                        verificar_alerta(cripto["nombre"], porcentaje)
+                
+                precios_anteriores[cripto["book"]] = precio_actual
+                print(f"-> {cripto['nombre']}: ${precio_actual:,.4f} USD{cambio_str}")
+                
+                datos_para_guardar.append(f"{tiempo_actual},{cripto['nombre']},{precio_actual}\n")
+            else:
+                print(f"-> No se pudo obtener el precio de {cripto['nombre']}.")
+                
+        guardar_registros(datos_para_guardar)
+            
+        print("\n[Datos guardados en CSV]")
         print("Esperando 10 segundos para la próxima actualización...\n")
-        # El programa pausará aquí durante 10 segundos antes de volver a consultar
         time.sleep(10)
 
 if __name__ == "__main__":
-    consultar_bitso_en_dolares()
+    ejecutar_monitor()
